@@ -298,7 +298,7 @@ public class IndexSerializer {
     }
 
     private static final String key2String(TitanKey key) {
-        return longID2Name(key.getID());
+        return key.getName();
     }
 
     private static final String longID2Name(long id) {
