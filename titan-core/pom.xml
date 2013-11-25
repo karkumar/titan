@@ -3,12 +3,16 @@
     <parent>
         <groupId>com.thinkaurelius.titan</groupId>
         <artifactId>titan</artifactId>
-        <version>0.4.0-Lab41</version>
+        <version>0.4.1-Lab41</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>titan-core</artifactId>
     <name>Titan-Core: Core Library for Titan</name>
     <url>http://thinkaurelius.github.com/titan/</url>
+    
+    <properties>
+        <top.level.basedir>${basedir}/..</top.level.basedir>
+    </properties>
 
     <dependencies>
         <!-- TinkerPop -->
@@ -38,6 +42,14 @@
         <dependency>
             <groupId>com.codahale.metrics</groupId>
             <artifactId>metrics-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.codahale.metrics</groupId>
+            <artifactId>metrics-ganglia</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.codahale.metrics</groupId>
+            <artifactId>metrics-graphite</artifactId>
         </dependency>
         <dependency>
             <groupId>com.spatial4j</groupId>
@@ -77,6 +89,11 @@
             <groupId>com.carrotsearch</groupId>
             <artifactId>hppc</artifactId>
             <version>0.4.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.stephenc.high-scale-lib</groupId>
+            <artifactId>high-scale-lib</artifactId>
+            <version>1.1.4</version>
         </dependency>
         <dependency>
             <groupId>com.esotericsoftware.kryo</groupId>

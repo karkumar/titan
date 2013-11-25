@@ -2,7 +2,7 @@ package com.thinkaurelius.titan.diskstorage.keycolumnvalue;
 
 import com.thinkaurelius.titan.diskstorage.ReadBuffer;
 import com.thinkaurelius.titan.diskstorage.StaticBuffer;
-import com.thinkaurelius.titan.util.datastructures.ImmutableLongObjectMap;
+import com.thinkaurelius.titan.graphdb.relations.RelationCache;
 
 import java.nio.ByteBuffer;
 
@@ -73,11 +73,20 @@ public interface Entry extends Comparable<Entry> {
      */
     public ByteBuffer getByteBufferValue();
 
+
     /**
-     * Returns the cached parsed representation of this Entry if it exists, else NULL
+     * Returns the total amount of bytes this entry consumes on the heap - including all object headers.
+     *
      * @return
      */
-    public ImmutableLongObjectMap getCache();
+    public int getByteSize();
+
+    /**
+     * Returns the cached parsed representation of this Entry if it exists, else NULL
+     *
+     * @return
+     */
+    public RelationCache getCache();
 
     /**
      * Sets the cached parsed representation of this Entry. This method does not synchronize,
@@ -85,6 +94,6 @@ public interface Entry extends Comparable<Entry> {
      *
      * @param cache
      */
-    public void setCache(ImmutableLongObjectMap cache);
+    public void setCache(RelationCache cache);
 
 }

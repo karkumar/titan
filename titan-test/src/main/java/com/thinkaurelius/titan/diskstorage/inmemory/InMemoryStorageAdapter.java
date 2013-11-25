@@ -123,6 +123,7 @@ public class InMemoryStorageAdapter implements KeyColumnValueStoreManager {
         f.supportsUnorderedScan = true;
         f.supportsOrderedScan = true;
         f.supportsBatchMutation = true;
+        f.supportsMultiQuery = true;
 
         f.supportsTransactions = true;
         f.supportsConsistentKeyOperations = false;
@@ -132,18 +133,6 @@ public class InMemoryStorageAdapter implements KeyColumnValueStoreManager {
         f.isDistributed = false;
         f.hasLocalKeyPartition = false;
         return f;
-    }
-
-    private final Map<String, String> config = Maps.newHashMap();
-
-    @Override
-    public String getConfigurationProperty(String key) throws StorageException {
-        return config.get(key);
-    }
-
-    @Override
-    public void setConfigurationProperty(String key, String value) throws StorageException {
-        config.put(key, value);
     }
 
     private static class EmptyRowIterator implements KeyIterator {
@@ -166,7 +155,7 @@ public class InMemoryStorageAdapter implements KeyColumnValueStoreManager {
         public void close() {
             // Do nothing
         }
-        
+
         @Override
         public void remove() {
             throw new UnsupportedOperationException("Can't remove element from empty iterator");

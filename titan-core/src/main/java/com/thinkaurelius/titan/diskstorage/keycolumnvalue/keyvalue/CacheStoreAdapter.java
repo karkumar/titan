@@ -41,10 +41,12 @@ public class CacheStoreAdapter extends BaseKeyColumnValueAdapter {
     private final BackendCompression compression = BackendCompression.NO_COMPRESSION;
     private final int maxMutationRetries = 10;
     private final int mutationRetryWaitTimeMS = 50;
+    private final CacheStoreManagerAdapter manager;
 
-    public CacheStoreAdapter(CacheStore store) {
+    public CacheStoreAdapter(CacheStore store, CacheStoreManagerAdapter manager) {
         super(store);
         this.store = store;
+        this.manager = manager;
     }
 
     private final StaticBuffer decompress(StaticBuffer value) {
@@ -85,7 +87,8 @@ public class CacheStoreAdapter extends BaseKeyColumnValueAdapter {
         BackendOperation.execute(new Callable<Object>() {
             @Override
             public Object call() throws Exception {
-                StaticBuffer oldValue = decompress(store.get(key, txh));
+                StaticBuffer oldValueCompress = store.get(key, txh);
+                StaticBuffer oldValue = decompress(oldValueCompress);
                 int oldLen = oldValue == null ? 0 : oldValue.length();
                 int newLen = oldLen + addLength;
                 Preconditions.checkArgument(newLen < MAX_BYTE_LEN, "New allocation [%s] exceeded max value length [%s] ", newLen, MAX_BYTE_LEN);
@@ -129,7 +132,7 @@ public class CacheStoreAdapter extends BaseKeyColumnValueAdapter {
                     store.delete(key, txh);
                 } else {
                     StaticBuffer newValue = compress(new StaticByteBuffer(out));
-                    store.replace(key, newValue, oldValue, txh);
+                    store.replace(key, newValue, oldValueCompress, txh);
                 }
                 return null;
             }
@@ -180,7 +183,8 @@ public class CacheStoreAdapter extends BaseKeyColumnValueAdapter {
 
     @Override
     public void acquireLock(StaticBuffer key, StaticBuffer column, StaticBuffer expectedValue, StoreTransaction txh) throws StorageException {
-        throw new UnsupportedOperationException(); //TODO: implement
+        //Awful hack to get around transactional constraint for Infinispan - TODO: This needs to be fixed!
+        Preconditions.checkState(manager.getFeatures().supportsLocking(),"Store does not support transactions and hence cannot acquire locks");
     }
 
     private class CacheKeyIterator implements KeyIterator {
@@ -216,7 +220,7 @@ public class CacheStoreAdapter extends BaseKeyColumnValueAdapter {
                     }
                     return false;
                 }
-                
+
             });
         }
 

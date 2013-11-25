@@ -10,10 +10,7 @@ import com.thinkaurelius.titan.core.TitanException;
 import com.thinkaurelius.titan.core.TitanFactory;
 import com.thinkaurelius.titan.diskstorage.idmanagement.ConsistentKeyIDManager;
 import com.thinkaurelius.titan.diskstorage.idmanagement.TransactionalIDManager;
-import com.thinkaurelius.titan.diskstorage.indexing.HashPrefixKeyColumnValueStore;
-import com.thinkaurelius.titan.diskstorage.indexing.IndexInformation;
-import com.thinkaurelius.titan.diskstorage.indexing.IndexProvider;
-import com.thinkaurelius.titan.diskstorage.indexing.IndexTransaction;
+import com.thinkaurelius.titan.diskstorage.indexing.*;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.*;
 import com.thinkaurelius.titan.diskstorage.keycolumnvalue.keyvalue.*;
 import com.thinkaurelius.titan.diskstorage.locking.Locker;
@@ -24,6 +21,7 @@ import com.thinkaurelius.titan.diskstorage.locking.transactional.TransactionalLo
 import com.thinkaurelius.titan.diskstorage.util.BackendOperation;
 import com.thinkaurelius.titan.diskstorage.util.MetricInstrumentedStore;
 import com.thinkaurelius.titan.graphdb.configuration.GraphDatabaseConfiguration;
+import com.thinkaurelius.titan.graphdb.configuration.KCVSConfiguration;
 import com.thinkaurelius.titan.graphdb.configuration.TitanConstants;
 import com.thinkaurelius.titan.graphdb.database.indexing.StandardIndexInformation;
 import com.thinkaurelius.titan.graphdb.transaction.TransactionConfiguration;
@@ -41,8 +39,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 
 import static com.thinkaurelius.titan.graphdb.configuration.GraphDatabaseConfiguration.*;
 
@@ -72,9 +69,13 @@ public class Backend {
     public static final String ID_STORE_NAME = "titan_ids";
 
     public static final String TITAN_BACKEND_VERSION = "titan-version";
-    public static final String METRICS_PREFIX = "com.thinkaurelius.titan.";
     public static final String MERGED_METRICS = "stores";
     public static final String LOCK_STORE_SUFFIX = "_lock_";
+
+    public static final String SYSTEM_PROPERTIES_STORE_NAME = "system_properties";
+    public static final String SYSTEM_PROPERTIES_IDENTIFIER = "general";
+
+    public static final int THREAD_POOL_SIZE_SCALE_FACTOR = 2;
 
     public static final Map<String, Integer> STATIC_KEY_LENGTHS = new HashMap<String, Integer>() {{
         put(EDGESTORE_NAME, 8);
@@ -100,6 +101,8 @@ public class Backend {
     private final int writeAttempts;
     private final int readAttempts;
     private final int persistAttemptWaittime;
+    private final ExecutorService threadPool;
+
     private final Function<String, Locker> lockerCreator;
     private final ConcurrentHashMap<String, Locker> lockers =
             new ConcurrentHashMap<String, Locker>();
@@ -114,7 +117,7 @@ public class Backend {
         storeFeatures = storeManager.getFeatures();
 
         basicMetrics = storageConfig.getBoolean(BASIC_METRICS, BASIC_METRICS_DEFAULT);
-        mergeBasicMetrics = storageConfig.getBoolean(MERGE_BASIC_METRICS, MERGE_BASIC_METRICS_DEFAULT);
+        mergeBasicMetrics = storageConfig.getBoolean(MERGE_BASIC_METRICS_KEY, MERGE_BASIC_METRICS_DEFAULT);
 
         int bufferSizeTmp = storageConfig.getInt(BUFFER_SIZE_KEY, BUFFER_SIZE_DEFAULT);
         Preconditions.checkArgument(bufferSizeTmp >= 0, "Buffer size must be non-negative (use 0 to disable)");
@@ -129,6 +132,14 @@ public class Backend {
         Preconditions.checkArgument(readAttempts > 0, "Read attempts must be positive");
         persistAttemptWaittime = storageConfig.getInt(STORAGE_ATTEMPT_WAITTIME_KEY, STORAGE_ATTEMPT_WAITTIME_DEFAULT);
         Preconditions.checkArgument(persistAttemptWaittime > 0, "Persistence attempt retry wait time must be non-negative");
+
+        if (storageConfig.getBoolean(PARALLEL_BACKEND_OPS_KEY, PARALLEL_BACKEND_OPS_DEFAULT)) {
+            int poolsize = Math.min(1, Runtime.getRuntime().availableProcessors()) * THREAD_POOL_SIZE_SCALE_FACTOR;
+            threadPool = Executors.newFixedThreadPool(poolsize);
+            log.info("Initiated backend operations thread pool of size {}", poolsize);
+        } else {
+            threadPool = null;
+        }
 
         // If lock prefix is unspecified, specify it now
         storageConfig.setProperty(ExpectedValueCheckingStore.LOCAL_LOCK_MEDIATOR_PREFIX_KEY,
@@ -222,7 +233,7 @@ public class Backend {
             //EdgeStore & VertexIndexStore
             KeyColumnValueStore idStore = getStore(ID_STORE_NAME);
             if (basicMetrics) {
-                idStore = new MetricInstrumentedStore(idStore, getMetricsPrefix("idStore"));
+                idStore = new MetricInstrumentedStore(idStore, getMetricsStoreName("idStore"));
             }
             idAuthority = null;
             if (storeFeatures.supportsTransactions()) {
@@ -244,27 +255,24 @@ public class Backend {
             }
 
             if (basicMetrics) {
-                edgeStore = new MetricInstrumentedStore(edgeStore, getMetricsPrefix("edgeStore"));
-                vertexIndexStore = new MetricInstrumentedStore(vertexIndexStore, getMetricsPrefix("vertexIndexStore"));
-                edgeIndexStore = new MetricInstrumentedStore(edgeIndexStore, getMetricsPrefix("edgeIndexStore"));
+                edgeStore = new MetricInstrumentedStore(edgeStore, getMetricsStoreName("edgeStore"));
+                vertexIndexStore = new MetricInstrumentedStore(vertexIndexStore, getMetricsStoreName("vertexIndexStore"));
+                edgeIndexStore = new MetricInstrumentedStore(edgeIndexStore, getMetricsStoreName("edgeIndexStore"));
             }
 
-            String version = BackendOperation.execute(new Callable<String>() {
-                @Override
-                public String call() throws Exception {
-                    String version = storeManager.getConfigurationProperty(TITAN_BACKEND_VERSION);
-                    if (version == null) {
-                        storeManager.setConfigurationProperty(TITAN_BACKEND_VERSION, TitanConstants.VERSION);
-                        version = TitanConstants.VERSION;
-                    }
-                    return version;
+            String version = null;
+            KCVSConfiguration systemConfig = new KCVSConfiguration(storeManager,SYSTEM_PROPERTIES_STORE_NAME,
+                                                        SYSTEM_PROPERTIES_IDENTIFIER);
+            try {
+                systemConfig.setMaxOperationWaitTime(config.getLong(SETUP_WAITTIME_KEY, SETUP_WAITTIME_DEFAULT));
+                version = systemConfig.getConfigurationProperty(TITAN_BACKEND_VERSION);
+                if (version == null) {
+                    systemConfig.setConfigurationProperty(TITAN_BACKEND_VERSION, TitanConstants.VERSION);
+                    version = TitanConstants.VERSION;
                 }
-
-                @Override
-                public String toString() {
-                    return "ConfigurationRead";
-                }
-            }, config.getLong(SETUP_WAITTIME_KEY, SETUP_WAITTIME_DEFAULT));
+            } finally {
+                systemConfig.close();
+            }
             Preconditions.checkState(version != null, "Could not read version from storage backend");
             if (!TitanConstants.VERSION.equals(version) && !TitanConstants.COMPATIBLE_VERSIONS.contains(version)) {
                 throw new TitanException("StorageBackend version is incompatible with current Titan version: " + version + " vs. " + TitanConstants.VERSION);
@@ -286,8 +294,8 @@ public class Backend {
         return copy.build();
     }
 
-    private String getMetricsPrefix(String storeName) {
-        return METRICS_PREFIX + (mergeBasicMetrics ? MERGED_METRICS : storeName);
+    private String getMetricsStoreName(String storeName) {
+        return mergeBasicMetrics ? MERGED_METRICS : storeName;
     }
 
     private final static KeyColumnValueStoreManager getStorageManager(Configuration storageConfig) {
@@ -321,7 +329,6 @@ public class Backend {
     }
 
     public final static <T> T instantiate(String clazzname, Object... constructorArgs) {
-
         try {
             Class clazz = Class.forName(clazzname);
             Constructor constructor = clazz.getConstructor(Configuration.class);
@@ -390,8 +397,8 @@ public class Backend {
      * @return
      * @throws StorageException
      */
-    public BackendTransaction beginTransaction(TransactionConfiguration configuration) throws StorageException {
-        StoreTxConfig txConfig = new StoreTxConfig();
+    public BackendTransaction beginTransaction(TransactionConfiguration configuration, KeyInformation.Retriever indexKeyRetriever) throws StorageException {
+        StoreTxConfig txConfig = new StoreTxConfig(configuration.getMetricsPrefix());
         if (configuration.hasTimestamp()) txConfig.setTimestamp(configuration.getTimestamp());
         StoreTransaction tx = storeManager.beginTransaction(txConfig);
         if (bufferSize > 1) {
@@ -402,7 +409,7 @@ public class Backend {
             if (storeFeatures.supportsTransactions()) {
                 //No transaction wrapping needed
             } else if (storeFeatures.supportsConsistentKeyOperations()) {
-                txConfig = new StoreTxConfig(ConsistencyLevel.KEY_CONSISTENT);
+                txConfig = new StoreTxConfig(ConsistencyLevel.KEY_CONSISTENT, configuration.getMetricsPrefix());
                 if (configuration.hasTimestamp()) txConfig.setTimestamp(configuration.getTimestamp());
                 tx = new ExpectedValueCheckingTransaction(tx,
                         storeManager.beginTransaction(txConfig),
@@ -413,12 +420,12 @@ public class Backend {
         //Index transactions
         Map<String, IndexTransaction> indexTx = new HashMap<String, IndexTransaction>(indexes.size());
         for (Map.Entry<String, IndexProvider> entry : indexes.entrySet()) {
-            indexTx.put(entry.getKey(), new IndexTransaction(entry.getValue()));
+            indexTx.put(entry.getKey(), new IndexTransaction(entry.getValue(), indexKeyRetriever.get(entry.getKey())));
         }
 
         return new BackendTransaction(tx, storeManager.getFeatures(),
                 edgeStore, vertexIndexStore, edgeIndexStore,
-                readAttempts, persistAttemptWaittime, indexTx);
+                readAttempts, persistAttemptWaittime, indexTx, threadPool);
     }
 
     public void close() throws StorageException {
@@ -427,6 +434,7 @@ public class Backend {
         edgeIndexStore.close();
         idAuthority.close();
         storeManager.close();
+        threadPool.shutdown();
         //Indexes
         for (IndexProvider index : indexes.values()) index.close();
     }
@@ -454,8 +462,9 @@ public class Backend {
         put("local", "com.thinkaurelius.titan.diskstorage.berkeleyje.BerkeleyJEStoreManager");
         put("berkeleyje", "com.thinkaurelius.titan.diskstorage.berkeleyje.BerkeleyJEStoreManager");
         put("persistit", "com.thinkaurelius.titan.diskstorage.persistit.PersistitStoreManager");
-        put("hazelcastkcvs", "com.thinkaurelius.titan.diskstorage.hazelcast.HazelcastKeyColumnValueStoreManager");
+        put("hazelcast", "com.thinkaurelius.titan.diskstorage.hazelcast.HazelcastCacheStoreManager");
         put("hazelcastcache", "com.thinkaurelius.titan.diskstorage.hazelcast.HazelcastCacheStoreManager");
+        put("infinispan", "com.thinkaurelius.titan.diskstorage.infinispan.InfinispanCacheStoreManager");
         put("cassandra", "com.thinkaurelius.titan.diskstorage.cassandra.astyanax.AstyanaxStoreManager");
         put("cassandrathrift", "com.thinkaurelius.titan.diskstorage.cassandra.thrift.CassandraThriftStoreManager");
         put("astyanax", "com.thinkaurelius.titan.diskstorage.cassandra.astyanax.AstyanaxStoreManager");
@@ -510,10 +519,43 @@ public class Backend {
         }
     };
 
+    private final Function<String, Locker> TEST_LOCKER_CREATOR = new Function<String, Locker>() {
+
+        @Override
+        public Locker apply(String lockerName) {
+            return openManagedLocker("com.thinkaurelius.titan.diskstorage.util.TestLockerManager",lockerName);
+
+        }
+    };
+
     private final Map<String, Function<String, Locker>> REGISTERED_LOCKERS = ImmutableMap.of(
             "consistentkey", CONSISTENT_KEY_LOCKER_CREATOR,
-            "astyanaxrecipe", ASTYANAX_RECIPE_LOCKER_CREATOR
+            "astyanaxrecipe", ASTYANAX_RECIPE_LOCKER_CREATOR,
+            "test", TEST_LOCKER_CREATOR
     );
+
+    private static Locker openManagedLocker(String classname, String lockerName) {
+        try {
+            Class c = Class.forName(classname);
+            Constructor constructor = c.getConstructor();
+            Object instance = constructor.newInstance();
+            Method method = c.getMethod("openLocker", String.class);
+            Object o = method.invoke(instance, lockerName);
+            return (Locker) o;
+        } catch (ClassNotFoundException e) {
+            throw new IllegalArgumentException("Could not find implementation class: " + classname);
+        } catch (InstantiationException e) {
+            throw new IllegalArgumentException("Could not instantiate implementation: " + classname, e);
+        } catch (NoSuchMethodException e) {
+            throw new IllegalArgumentException("Could not find method when configuring locking for: " + classname,e);
+        } catch (IllegalAccessException e) {
+            throw new IllegalArgumentException("Could not access method when configuring locking for: " + classname,e);
+        } catch (InvocationTargetException e) {
+            throw new IllegalArgumentException("Could not invoke method when configuring locking for: " + classname,e);
+        } catch (ClassCastException e) {
+            throw new IllegalArgumentException("Could not instantiate implementation: " + classname, e);
+        }
+    }
 
     static {
         Properties props;

@@ -2,6 +2,7 @@ package com.thinkaurelius.titan.diskstorage.hbase;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterators;
 import com.thinkaurelius.titan.diskstorage.PermanentStorageException;
 import com.thinkaurelius.titan.diskstorage.StaticBuffer;
@@ -42,15 +43,21 @@ public class HBaseKeyColumnValueStore implements KeyColumnValueStore {
 
     private final String tableName;
     private final HTablePool pool;
+    private final HBaseStoreManager storeManager;
 
+    // When using shortened CF names, columnFamily is the shortname and storeName is the longname
+    // When not using shortened CF names, they are the same
     private final String columnFamily;
+    private final String storeName;
     // This is columnFamily.getBytes()
     private final byte[] columnFamilyBytes;
 
-    HBaseKeyColumnValueStore(HTablePool pool, String tableName, String columnFamily) {
+    HBaseKeyColumnValueStore(HBaseStoreManager storeManager, HTablePool pool, String tableName, String columnFamily, String storeName) {
+        this.storeManager = storeManager;
         this.tableName = tableName;
         this.pool = pool;
         this.columnFamily = columnFamily;
+        this.storeName = storeName;
         this.columnFamilyBytes = columnFamily.getBytes();
     }
 
@@ -152,32 +159,15 @@ public class HBaseKeyColumnValueStore implements KeyColumnValueStore {
         }
     }
 
+
     @Override
-    public void mutate(StaticBuffer key,
-                       List<Entry> additions,
-                       List<StaticBuffer> deletions,
-                       StoreTransaction txh) throws StorageException {
-        // TODO: use RowMutations (requires 0.94.x-ish HBase), error handling through the legacy batch() method sucks
-        List<Row> batch = makeBatch(columnFamilyBytes, key.as(StaticBuffer.ARRAY_FACTORY), additions, deletions);
+    public void mutate(StaticBuffer key, List<Entry> additions, List<StaticBuffer> deletions, StoreTransaction txh) throws StorageException {
+        Map<StaticBuffer, KCVMutation> mutations = ImmutableMap.of(key, new KCVMutation(additions, deletions));
+        mutateMany(mutations, txh);
+    }
 
-        if (batch.isEmpty())
-            return; // nothing to apply
-
-        try {
-            HTableInterface table = null;
-
-            try {
-                table = pool.getTable(tableName);
-                table.batch(batch);
-                table.flushCommits();
-            } finally {
-                IOUtils.closeQuietly(table);
-            }
-        } catch (IOException e) {
-            throw new TemporaryStorageException(e);
-        } catch (InterruptedException e) {
-            throw new TemporaryStorageException(e);
-        }
+    public void mutateMany(Map<StaticBuffer, KCVMutation> mutations, StoreTransaction txh) throws StorageException {
+        storeManager.mutateMany(ImmutableMap.of(columnFamily, mutations), txh);
     }
 
     @Override
@@ -235,7 +225,7 @@ public class HBaseKeyColumnValueStore implements KeyColumnValueStore {
 
     @Override
     public String getName() {
-        return columnFamily;
+        return storeName;
     }
 
     /**

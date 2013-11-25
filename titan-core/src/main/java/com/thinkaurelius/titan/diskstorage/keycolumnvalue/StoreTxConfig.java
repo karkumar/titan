@@ -2,6 +2,7 @@ package com.thinkaurelius.titan.diskstorage.keycolumnvalue;
 
 import com.google.common.base.Preconditions;
 import com.thinkaurelius.titan.diskstorage.util.TimeUtility;
+import com.thinkaurelius.titan.graphdb.configuration.GraphDatabaseConfiguration;
 
 /**
  * @author Matthias Broecheler (me@matthiasb.com)
@@ -10,16 +11,29 @@ import com.thinkaurelius.titan.diskstorage.util.TimeUtility;
 public class StoreTxConfig {
 
     private final ConsistencyLevel consistency;
+    
+    private final String metricsPrefix;
 
     private Long timestamp = null;
 
     public StoreTxConfig() {
-        this(ConsistencyLevel.DEFAULT);
+        this(ConsistencyLevel.DEFAULT,
+             GraphDatabaseConfiguration.getSystemMetricsPrefix());
+    }
+    
+    public StoreTxConfig(ConsistencyLevel consistency) {
+        this(consistency,
+             GraphDatabaseConfiguration.getSystemMetricsPrefix());
+    }
+    
+    public StoreTxConfig(String metricsPrefix) {
+        this(ConsistencyLevel.DEFAULT, metricsPrefix);
     }
 
-    public StoreTxConfig(ConsistencyLevel consistency) {
+    public StoreTxConfig(ConsistencyLevel consistency, String metricsPrefix) {
         Preconditions.checkNotNull(consistency);
         this.consistency = consistency;
+        this.metricsPrefix = metricsPrefix;
     }
 
     public StoreTxConfig setTimestamp() {
@@ -36,13 +50,14 @@ public class StoreTxConfig {
         return consistency;
     }
 
-    public boolean hasTimestamp() {
-        return this.timestamp != null;
-    }
-
     public long getTimestamp() {
-        Preconditions.checkArgument(timestamp != null, "A timestamp has not been set");
+        if (timestamp==null) setTimestamp();
+        assert timestamp!=null;
         return timestamp;
+    }
+    
+    public String getMetricsPrefix() {
+        return metricsPrefix;
     }
 
 }

@@ -41,7 +41,7 @@ public class InMemoryStoreManager implements KeyColumnValueStoreManager {
         features.supportsConsistentKeyOperations = true;
         features.supportsLocking = false;
         features.isDistributed = false;
-
+        features.supportsMultiQuery = false;
         features.isKeyOrdered = true;
         features.hasLocalKeyPartition = false;
     }
@@ -69,16 +69,6 @@ public class InMemoryStoreManager implements KeyColumnValueStoreManager {
     @Override
     public StoreFeatures getFeatures() {
         return features;
-    }
-
-    @Override
-    public String getConfigurationProperty(String key) throws StorageException {
-        return storeConfig.get(key);
-    }
-
-    @Override
-    public void setConfigurationProperty(String key, String value) throws StorageException {
-        storeConfig.put(key, value);
     }
 
     @Override

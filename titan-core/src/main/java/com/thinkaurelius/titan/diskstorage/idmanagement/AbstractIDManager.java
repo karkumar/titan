@@ -29,6 +29,8 @@ public abstract class AbstractIDManager implements IDAuthority {
     protected final int idApplicationRetryCount;
 
     protected final byte[] rid;
+    
+    protected final String metricsPrefix;
 
     private IDBlockSizer blockSizer;
     private volatile boolean isActive;
@@ -47,6 +49,8 @@ public abstract class AbstractIDManager implements IDAuthority {
                 config.getInt(
                         GraphDatabaseConfiguration.IDAUTHORITY_RETRY_COUNT_KEY,
                         GraphDatabaseConfiguration.IDAUTHORITY_RETRY_COUNT_DEFAULT);
+
+        this.metricsPrefix = GraphDatabaseConfiguration.getSystemMetricsPrefix();
     }
 
     @Override
@@ -70,10 +74,22 @@ public abstract class AbstractIDManager implements IDAuthority {
      * @param partition
      * @return
      */
-    protected long getBlockSize(int partition) {
+    protected long getBlockSize(final int partition) {
         Preconditions.checkArgument(blockSizer != null, "Blocksizer has not yet been initialized");
         isActive = true;
-        return blockSizer.getBlockSize(partition);
+        long blockSize = blockSizer.getBlockSize(partition);
+        Preconditions.checkArgument(blockSize>0,"Invalid block size: %s",blockSize);
+        Preconditions.checkArgument(blockSize<getIdUpperBound(partition),
+                "Block size [%s] cannot be larger than upper bound [%s] for partition [%s]",blockSize,getIdUpperBound(partition),partition);
+        return blockSize;
+    }
+
+    protected long getIdUpperBound(final int partition) {
+        Preconditions.checkArgument(blockSizer != null, "Blocksizer has not yet been initialized");
+        isActive = true;
+        long upperBound = blockSizer.getIdUpperBound(partition);
+        Preconditions.checkArgument(upperBound>0,"Invalid upper bound: %s",upperBound);
+        return upperBound;
     }
 
 }

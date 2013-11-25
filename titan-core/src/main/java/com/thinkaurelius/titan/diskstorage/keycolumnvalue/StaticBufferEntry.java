@@ -3,8 +3,8 @@ package com.thinkaurelius.titan.diskstorage.keycolumnvalue;
 import com.google.common.base.Preconditions;
 import com.thinkaurelius.titan.diskstorage.ReadBuffer;
 import com.thinkaurelius.titan.diskstorage.StaticBuffer;
-import com.thinkaurelius.titan.diskstorage.util.ByteBufferUtil;
-import com.thinkaurelius.titan.util.datastructures.ImmutableLongObjectMap;
+import com.thinkaurelius.titan.graphdb.relations.RelationCache;
+import com.thinkaurelius.titan.util.datastructures.ByteSize;
 
 import java.nio.ByteBuffer;
 
@@ -26,8 +26,20 @@ public class StaticBufferEntry implements Entry {
         this.value = value;
     }
 
+
+    public static Entry of(StaticBuffer column) {
+        return new StaticBufferEntry(column, NO_VALUE);
+    }
+
     public static Entry of(StaticBuffer column, StaticBuffer value) {
-        return new StaticBufferEntry(column,value);
+        return new StaticBufferEntry(column, value);
+    }
+
+    @Override
+    public int getByteSize() {
+        return ByteSize.OBJECT_HEADER + ByteSize.OBJECT_REFERENCE +
+                2 * (ByteSize.OBJECT_REFERENCE + ByteSize.STATICARRAYBUFFER_RAW_SIZE) +
+                2 * (column.length() + value.length()); //multiply by 2 to account for approx storage of RelationCache
     }
 
     @Override
@@ -87,29 +99,29 @@ public class StaticBufferEntry implements Entry {
 
     @Override
     public String toString() {
-        return column.toString()+"->"+value.toString();
+        return column.toString() + "->" + value.toString();
     }
 
     @Override
     public int compareTo(Entry entry) {
-        return ByteBufferUtil.compare(getColumn(),entry.getColumn());
+        return column.compareTo(entry.getColumn());
     }
 
     /**
      * ############# IDENTICAL CODE ###############
      */
 
-    private volatile transient ImmutableLongObjectMap cache;
+    private volatile transient RelationCache cache;
 
     @Override
-    public ImmutableLongObjectMap getCache() {
+    public RelationCache getCache() {
         return cache;
     }
 
     @Override
-    public void setCache(ImmutableLongObjectMap cache) {
+    public void setCache(RelationCache cache) {
         Preconditions.checkNotNull(cache);
-        this.cache=cache;
+        this.cache = cache;
     }
 
 }

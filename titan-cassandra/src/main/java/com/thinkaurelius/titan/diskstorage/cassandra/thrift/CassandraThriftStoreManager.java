@@ -15,7 +15,6 @@ import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
@@ -23,8 +22,6 @@ import org.apache.cassandra.thrift.Cassandra;
 import org.apache.cassandra.thrift.CfDef;
 import org.apache.cassandra.thrift.Column;
 import org.apache.cassandra.thrift.ColumnOrSuperColumn;
-import org.apache.cassandra.thrift.ColumnParent;
-import org.apache.cassandra.thrift.ColumnPath;
 import org.apache.cassandra.thrift.ConsistencyLevel;
 import org.apache.cassandra.thrift.Deletion;
 import org.apache.cassandra.thrift.InvalidRequestException;
@@ -86,8 +83,7 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
                 GraphDatabaseConfiguration.CONNECTION_POOL_SIZE_KEY,
                 GraphDatabaseConfiguration.CONNECTION_POOL_SIZE_DEFAULT);
 
-        this.factory = new CTConnectionFactory(randomInitialHostname, port,
-                thriftTimeoutMS, thriftFrameSize);
+        factory = new CTConnectionFactory(randomInitialHostname, port, username, password, thriftTimeoutMS, thriftFrameSize);
 
         CTConnectionPool p = new CTConnectionPool(factory);
         p.setTestOnBorrow(true);
@@ -111,11 +107,13 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
         }
     }
 
+
     @Override
-    public Partitioner getPartitioner() throws StorageException {
-        return Partitioner.getPartitioner(getCassandraPartitioner());
+    public Deployment getDeployment() {
+        return Deployment.REMOTE;
     }
 
+    @Override
     @SuppressWarnings("unchecked")
     public IPartitioner<? extends Token<?>> getCassandraPartitioner() throws StorageException {
         CTConnection conn = null;
@@ -390,20 +388,20 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
     }
 
     private void createColumnFamily(Cassandra.Client client,
-                                           String ksName,
-                                           String cfName,
-                                           String comparator) throws StorageException {
+                                    String ksName,
+                                    String cfName,
+                                    String comparator) throws StorageException {
 
         CfDef createColumnFamily = new CfDef();
         createColumnFamily.setName(cfName);
         createColumnFamily.setKeyspace(ksName);
         createColumnFamily.setComparator_type(comparator);
-        
+
         ImmutableMap.Builder<String, String> compressionOptions = new ImmutableMap.Builder<String, String>();
 
         if (compressionEnabled) {
             compressionOptions.put("sstable_compression", compressionClass)
-                              .put("chunk_length_kb", Integer.toString(compressionChunkSizeKB));
+                    .put("chunk_length_kb", Integer.toString(compressionChunkSizeKB));
         }
 
         createColumnFamily.setCompression_options(compressionOptions.build());
@@ -428,65 +426,10 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
     }
 
     @Override
-    public String getConfigurationProperty(final String key) throws StorageException {
-        CTConnection connection = null;
-
-        try {
-            ensureColumnFamilyExists(keySpaceName, SYSTEM_PROPERTIES_CF, "org.apache.cassandra.db.marshal.UTF8Type");
-
-            connection = pool.borrowObject(keySpaceName);
-            Cassandra.Client client = connection.getClient();
-            ColumnOrSuperColumn column = client.get(UTF8Type.instance.fromString(SYSTEM_PROPERTIES_KEY),
-                    new ColumnPath(SYSTEM_PROPERTIES_CF).setColumn(UTF8Type.instance.fromString(key)),
-                    ConsistencyLevel.QUORUM);
-
-            if (column == null || !column.isSetColumn())
-                return null;
-
-            Column actualColumn = column.getColumn();
-
-            return (actualColumn.value == null)
-                    ? null
-                    : UTF8Type.instance.getString(actualColumn.value);
-        } catch (NotFoundException e) {
-            return null;
-        } catch (Exception e) {
-            throw new PermanentStorageException(e);
-        } finally {
-            pool.returnObjectUnsafe(keySpaceName, connection);
-        }
-    }
-
-    @Override
-    public void setConfigurationProperty(final String rawKey, final String rawValue) throws StorageException {
-        CTConnection connection = null;
-
-        try {
-            connection = pool.borrowObject(keySpaceName);
-
-            ensureColumnFamilyExists(keySpaceName, SYSTEM_PROPERTIES_CF, "org.apache.cassandra.db.marshal.UTF8Type");
-
-            ByteBuffer key = UTF8Type.instance.fromString(rawKey);
-            ByteBuffer val = UTF8Type.instance.fromString(rawValue);
-
-            Cassandra.Client client = connection.getClient();
-
-            client.insert(UTF8Type.instance.fromString(SYSTEM_PROPERTIES_KEY),
-                    new ColumnParent(SYSTEM_PROPERTIES_CF),
-                    new Column(key).setValue(val).setTimestamp(System.currentTimeMillis()),
-                    ConsistencyLevel.QUORUM);
-        } catch (Exception e) {
-            throw new PermanentStorageException(e);
-        } finally {
-            pool.returnObjectUnsafe(keySpaceName, connection);
-        }
-    }
-
-    @Override
     public Map<String, String> getCompressionOptions(String cf) throws StorageException {
         CTConnection conn = null;
         Map<String, String> result = null;
-        
+
         try {
             conn = pool.borrowObject(keySpaceName);
             Cassandra.Client client = conn.getClient();
@@ -499,7 +442,7 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
                     break;
                 }
             }
-            
+
             return result;
         } catch (InvalidRequestException e) {
             log.debug("Keyspace {} does not exist", keySpaceName);
@@ -671,7 +614,7 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
                 log.info(
                         "New hottest Cassandra endpoint found: {} with hotness {}",
                         hotHost, hottestEndTokenValue);
-                Config newConfig = new Config(hotHost, cfg.getPort(),
+                Config newConfig = new Config(hotHost, cfg.getPort(), username, password,
                         cfg.getTimeoutMS(), cfg.getFrameSize());
 
                 assert !newConfig.equals(cfg);
@@ -753,7 +696,7 @@ public class CassandraThriftStoreManager extends AbstractCassandraStoreManager {
                     m = newbytesPat.matcher(rawToken);
                 }
                 if (!m.matches()) {
-                    log.error("Couldn't match token {} against pattern {} or {} ", new Object[] { rawToken, oldPat, newbytesPat });
+                    log.error("Couldn't match token {} against pattern {} or {} ", new Object[]{rawToken, oldPat, newbytesPat});
                     pool.returnObjectUnsafe(SYSTEM_KS, conn);
                     conn = null;
                     return;
