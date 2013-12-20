@@ -407,16 +407,20 @@ public class IndexSerializer {
     }
 
     private static final String element2String(TitanElement element) {
-        if (element instanceof TitanVertex) return longID2Name(element.getID());
-        else {
+        if (element instanceof TitanVertex) {
+            return element.getId().toString();
+        } else {
             RelationIdentifier rid = (RelationIdentifier) element.getId();
             return rid.toString();
         }
     }
 
     private static final Object string2ElementId(String str) {
-        if (str.contains(RelationIdentifier.TOSTRING_DELIMITER)) return RelationIdentifier.parse(str);
-        else return name2LongID(str);
+        if (str.contains(RelationIdentifier.TOSTRING_DELIMITER)) {
+            return RelationIdentifier.parse(str);
+        } else {
+            return Long.valueOf(str);
+        }
     }
 
     private static final String key2String(TitanKey key) {
