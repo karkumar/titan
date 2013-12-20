@@ -110,8 +110,7 @@ public class IndexSerializer {
                 @Override
                 public KeyInformation get(String store, String key) {
                     Preconditions.checkState(transaction!=null,"Retriever has not been initialized");
-                    long keyid = string2KeyId(key);
-                    TitanKey titanKey = (TitanKey)transaction.getExistingType(keyid);
+                    TitanKey titanKey = (TitanKey)transaction.getType(key);
                     ElementType elementType = getElementType(store);
                     return getKeyInformation(titanKey,elementType.getElementType(),index);
                 }
