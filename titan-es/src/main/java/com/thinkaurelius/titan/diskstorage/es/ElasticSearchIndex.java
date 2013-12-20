@@ -80,6 +80,8 @@ public class ElasticSearchIndex implements IndexProvider {
     public static final boolean LOCAL_MODE_DEFAULT = false;
     public static final String CLIENT_SNIFF_KEY = "sniff";
     public static final boolean CLIENT_SNIFF_DEFAULT = true;
+    public static final String PING_TIMEOUT_KEY = "ping-timeout";
+    public static final String NODES_SAMPLER_INTERVAL = "nodes-sampler-interval";
 
     //    public static final String HOST_NAMES_KEY = "hosts";
     public static final int HOST_PORT_DEFAULT = 9300;
@@ -142,6 +144,17 @@ public class ElasticSearchIndex implements IndexProvider {
             }
             log.debug("Transport sniffing enabled: {}", config.getBoolean(CLIENT_SNIFF_KEY, CLIENT_SNIFF_DEFAULT));
             settings.put("client.transport.sniff", config.getBoolean(CLIENT_SNIFF_KEY, CLIENT_SNIFF_DEFAULT));
+
+            String ping_timeout = config.getString(PING_TIMEOUT_KEY, null);
+            if (ping_timeout != null) {
+                settings.put("client.transport.ping_timeout", ping_timeout);
+            }
+
+            String nodes_sampler_interval = config.getString(NODES_SAMPLER_INTERVAL, null);
+            if (nodes_sampler_interval != null) {
+                settings.put("client.transport.nodes_sampler_interval", nodes_sampler_interval);
+            }
+
             TransportClient tc = new TransportClient(settings.build());
             for (String host : config.getStringArray(GraphDatabaseConfiguration.HOSTNAME_KEY)) {
                 String[] hostparts = host.split(":");
