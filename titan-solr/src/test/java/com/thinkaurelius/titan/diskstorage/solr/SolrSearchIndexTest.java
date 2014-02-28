@@ -38,7 +38,7 @@ public class SolrSearchIndexTest extends IndexProviderTest {
         return true;
     }
 
-    public static final Configuration getLocalSolrTestConfig() {
+    public static Configuration getLocalSolrTestConfig() {
         Configuration config = new BaseConfiguration();
 
         //SOLR_MODE_HTTP
@@ -63,32 +63,33 @@ public class SolrSearchIndexTest extends IndexProviderTest {
         return config;
     }
 
-    @Test
-    public void storeWithBoundingBoxGeospatialSearch() throws StorageException
-    {
-        this.openIndex().clearStorage();
-
-        String[] stores = new String[] { "vertex" };
-
-        Map<String,Object> doc1 = getDocument("Hello world",1001,5.2, Geoshape.point(48.0, 0.0));
-        Map<String,Object> doc2 = getDocument("Tomorrow is the world",1010,8.5,Geoshape.point(49.0,1.0));
-        Map<String,Object> doc3 = getDocument("Hello Bob, are you there?", -500, 10.1, Geoshape.point(47.0, 10.0));
-
-        for (String store : stores) {
-            initialize(store);
-
-            add(store,"doc1",doc1,true);
-            add(store,"doc2",doc2,true);
-            add(store,"doc3",doc3,false);
-        }
-
-        clopen();
-
-        for (String store : stores) {
-
-            List<String> result = tx.query(new IndexQuery(store, PredicateCondition.of("location", Geo.WITHIN, Geoshape.box(46.5, -0.5, 50.5, 10.5))));
-            assertEquals(3,result.size());
-            assertEquals(ImmutableSet.of("doc1", "doc2", "doc3"), ImmutableSet.copyOf(result));
-        }
-    }
+//
+//    @Test
+//    public void storeWithBoundingBoxGeospatialSearch() throws StorageException
+//    {
+//        this.openIndex().clearStorage();
+//
+//        String[] stores = new String[] { "vertex" };
+//
+//        Map<String,Object> doc1 = getDocument("Hello world",1001,5.2, Geoshape.point(48.0, 0.0));
+//        Map<String,Object> doc2 = getDocument("Tomorrow is the world",1010,8.5,Geoshape.point(49.0,1.0));
+//        Map<String,Object> doc3 = getDocument("Hello Bob, are you there?", -500, 10.1, Geoshape.point(47.0, 10.0));
+//
+//        for (String store : stores) {
+//            initialize(store);
+//
+//            add(store,"doc1",doc1,true);
+//            add(store,"doc2",doc2,true);
+//            add(store,"doc3",doc3,false);
+//        }
+//
+//        clopen();
+//
+//        for (String store : stores) {
+//
+//            List<String> result = tx.query(new IndexQuery(store, PredicateCondition.of("location", Geo.WITHIN, Geoshape.box(46.5, -0.5, 50.5, 10.5))));
+//            assertEquals(3,result.size());
+//            assertEquals(ImmutableSet.of("doc1", "doc2", "doc3"), ImmutableSet.copyOf(result));
+//        }
+//    }
 }
